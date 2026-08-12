@@ -365,13 +365,23 @@ async function stopQsign() {
 async function fetchRawMessage(request) {
     if (!request || typeof request !== 'object') throw new TypeError('拉取请求必须是对象。');
     const status = await getStatus();
-    if (!status.identity) throw new Error('尚未导入手机 QQ 身份。');
-    if (!status.sso.available) {
-        const error = new Error('移动端 SSO 运行时仍在配置中。');
-        error.code = 'MOBILE_SSO_NOT_READY';
-        throw error;
+    if (!status.identity) {
+        return {
+            ok: false,
+            code: 'MOBILE_IDENTITY_MISSING',
+            stage: 'identity-missing',
+            message: '尚未导入手机 QQ 身份，请先导入手机身份。'
+        };
     }
-    throw new Error('移动端 SSO 未初始化。');
+    if (!status.sso.available) {
+        return {
+            ok: false,
+            code: 'MOBILE_SSO_TRANSPORT_UNAVAILABLE',
+            stage: status.sso.stage || 'transport-missing',
+            message: status.sso.reason || '手机身份和 qsign 已就绪，但移动 QQ 网络传输后端尚未接入。'
+        };
+    }
+    return { ok: false, code: 'MOBILE_SSO_NOT_IMPLEMENTED', message: '移动端 SSO 拉取后端尚未实现。' };
 }
 
 const service = Object.freeze({

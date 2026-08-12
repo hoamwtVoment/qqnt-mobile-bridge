@@ -220,7 +220,7 @@ export async function onSettingWindowCreated(view) {
         const ssoText = status.sso?.available ? '可用' : ({
             'identity-missing': '缺少手机身份',
             'qsign-offline': '等待 qsign',
-            'transport-missing': '缺少传输后端'
+            'transport-missing': '传输未接入'
         }[status.sso?.stage] || '不可用');
         setState('sso', ssoText, status.sso?.available ? 'ok' : 'pending');
         stateElements.sso.title = status.sso?.reason || '';
