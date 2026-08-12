@@ -289,8 +289,25 @@ async function startQsign() {
 }
 
 async function stopQsign() {
-    if (qsignProcess && !qsignProcess.killed) qsignProcess.kill();
+    const processId = qsignProcess?.pid;
+    if (processId && !qsignProcess.killed) {
+        if (process.platform === 'win32') {
+            try {
+                await execFileAsync('taskkill.exe', ['/pid', String(processId), '/t', '/f'], {
+                    windowsHide: true,
+                    timeout: 8_000
+                });
+            } catch {
+                qsignProcess.kill();
+            }
+        } else {
+            qsignProcess.kill('SIGTERM');
+        }
+    }
     qsignProcess = null;
+    qsignLogStream?.end();
+    qsignLogStream = null;
+    broadcastStatus();
     return getStatus();
 }
 
