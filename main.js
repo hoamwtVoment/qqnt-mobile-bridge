@@ -140,9 +140,17 @@ async function enrichIdentityManifest(identity) {
             });
             device = JSON.parse(String(stdout).replace(/^\uFEFF/, ''));
         } catch {}
+        let authenticatedUin = '';
+        try {
+            const { stdout } = await execFileAsync('tar.exe', ['-xOzf', identity.archive,
+                './private/files/msfCore/.MSFSDKDataDir/.MSFAuthUin/.MSFAuthUinsV1.dat'], {
+                windowsHide: true, timeout: 8_000, maxBuffer: 512 * 1024
+            });
+            authenticatedUin = String(stdout).match(/\d{5,12}/)?.[0] || '';
+        } catch {}
         const enriched = {
             ...identity,
-            authenticatedUin: identity.authenticatedUin || current,
+            authenticatedUin: identity.authenticatedUin || authenticatedUin || current,
             deviceManufacturer: identity.deviceManufacturer || device.deviceManufacturer || '',
             deviceModel: identity.deviceModel || device.deviceModel || '',
             deviceName: identity.deviceName || device.deviceName || ''

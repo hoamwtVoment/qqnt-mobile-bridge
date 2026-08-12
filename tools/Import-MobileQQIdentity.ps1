@@ -156,7 +156,9 @@ try {
         archiveBytes = (Get-Item -LiteralPath $currentArchive).Length
         mode = "offline-mobile-identity"
     }
-    $currentUin = Invoke-RootShell "find $remoteStage/private/files/user -maxdepth 1 -type f -name 'u_*_t' -printf '%f\n' 2>/dev/null | sed -n 's/^u_\([0-9][0-9]*\)_t$/\1/p' | head -n 1"
+    $authUins = Invoke-RootShell "cat $remoteStage/private/files/msfCore/.MSFSDKDataDir/.MSFAuthUin/.MSFAuthUinsV1.dat 2>/dev/null"
+    $authCandidates = @([regex]::Matches($authUins, '\d{5,12}') | ForEach-Object { $_.Value } | Select-Object -Unique)
+    $currentUin = if ($authCandidates.Count) { $authCandidates[0] } else { Invoke-RootShell "find $remoteStage/private/files/user -maxdepth 1 -type f -name 'u_*_t' -printf '%f\n' 2>/dev/null | sed -n 's/^u_\([0-9][0-9]*\)_t$/\1/p' | head -n 1" }
     $uinCandidates = Invoke-RootShell "find $remoteStage/private/files/uid -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sed -n 's/###.*//p'"
     $uins = @($uinCandidates -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d{5,12}$' } | Select-Object -Unique)
     if ($currentUin.Trim() -match '^\d{5,12}$') {
