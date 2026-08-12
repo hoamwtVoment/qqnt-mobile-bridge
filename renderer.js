@@ -161,8 +161,9 @@ export async function onSettingWindowCreated(view) {
               </div>
               <div class="qmb-status-grid">
                 <div class="qmb-status-item"><span class="qmb-status-label">ADB</span><span id="qmb-state-adb" class="qmb-status-value">检查中</span></div>
-                <div class="qmb-status-item"><span class="qmb-status-label">设备</span><span id="qmb-state-device" class="qmb-status-value">检查中</span></div>
+                <div class="qmb-status-item"><span class="qmb-status-label">设备名</span><span id="qmb-state-device" class="qmb-status-value">检查中</span></div>
                 <div class="qmb-status-item"><span class="qmb-status-label">手机身份</span><span id="qmb-state-identity" class="qmb-status-value">检查中</span></div>
+                <div class="qmb-status-item"><span class="qmb-status-label">当前认证 QQ</span><span id="qmb-state-account" class="qmb-status-value">检查中</span></div>
                 <div class="qmb-status-item"><span class="qmb-status-label">qsign</span><span id="qmb-state-qsign" class="qmb-status-value">检查中</span></div>
                 <div class="qmb-status-item"><span class="qmb-status-label">移动 SSO</span><span id="qmb-state-sso" class="qmb-status-value">检查中</span></div>
               </div>
@@ -185,6 +186,7 @@ export async function onSettingWindowCreated(view) {
         adb: root.querySelector('#qmb-state-adb'),
         device: root.querySelector('#qmb-state-device'),
         identity: root.querySelector('#qmb-state-identity'),
+        account: root.querySelector('#qmb-state-account'),
         qsign: root.querySelector('#qmb-state-qsign'),
         sso: root.querySelector('#qmb-state-sso')
     };
@@ -210,8 +212,10 @@ export async function onSettingWindowCreated(view) {
         const device = status.adb?.devices?.find(item => item.state === 'device');
         const identity = status.identity;
         setState('adb', status.adb?.available ? '可用' : '不可用', status.adb?.available ? 'ok' : 'pending');
-        setState('device', device ? `${device.serial} · 已授权` : '未连接', device ? 'ok' : 'pending');
+        const deviceName = identity?.deviceName || [identity?.deviceManufacturer, identity?.deviceModel].filter(Boolean).join(' ') || device?.model || device?.product;
+        setState('device', deviceName || (device ? '已连接（名称待重新导入）' : '未连接'), device ? 'ok' : 'pending');
         setState('identity', identity ? `QQ ${identity.versionName || '未知版本'}` : '尚未导入', identity ? 'ok' : 'pending');
+        setState('account', identity?.authenticatedUin || '待重新导入识别', identity?.authenticatedUin ? 'ok' : 'pending');
         setState('qsign', status.qsign?.reachable ? '正在运行' : '未运行', status.qsign?.reachable ? 'ok' : 'pending');
         const ssoText = status.sso?.available ? '可用' : ({
             'identity-missing': '缺少手机身份',

@@ -75,6 +75,8 @@ $versionDump = Invoke-AdbText @("-s", $serial, "shell", "dumpsys", "package", $P
 $versionName = [regex]::Match($versionDump, "versionName=([^\s]+)").Groups[1].Value
 $versionCode = [regex]::Match($versionDump, "versionCode=(\d+)").Groups[1].Value
 $abi = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.cpu.abi")
+$deviceManufacturer = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.manufacturer")
+$deviceModel = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.model")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $remoteStage = "/data/local/tmp/qqnt_mobile_identity_$stamp"
@@ -122,6 +124,9 @@ try {
         versionName = $versionName
         versionCode = $versionCode
         abi = $abi
+        deviceManufacturer = $deviceManufacturer
+        deviceModel = $deviceModel
+        deviceName = ((@($deviceManufacturer, $deviceModel) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join " ").Trim()
         installRoot = $installRoot
     } | ConvertTo-Json -Depth 4 -Compress
     $deviceInfoBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($deviceInfo))
@@ -142,10 +147,25 @@ try {
         versionName = $versionName
         versionCode = $versionCode
         abi = $abi
+        deviceManufacturer = $deviceManufacturer
+        deviceModel = $deviceModel
+        deviceName = ((@($deviceManufacturer, $deviceModel) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join " ").Trim()
+        authenticatedUin = ""
         archive = $currentArchive
         archiveSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $currentArchive).Hash.ToLowerInvariant()
         archiveBytes = (Get-Item -LiteralPath $currentArchive).Length
         mode = "offline-mobile-identity"
+    }
+    $currentUin = Invoke-RootShell "find $remoteStage/private/files/user -maxdepth 1 -type f -name 'u_*_t' -printf '%f\n' 2>/dev/null | sed -n 's/^u_\([0-9][0-9]*\)_t$/\1/p' | head -n 1"
+    $uinCandidates = Invoke-RootShell "find $remoteStage/private/files/uid -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sed -n 's/###.*//p'"
+    $uins = @($uinCandidates -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d{5,12}$' } | Select-Object -Unique)
+    if ($currentUin.Trim() -match '^\d{5,12}$') {
+        $manifest.authenticatedUin = $currentUin.Trim()
+    } elseif ($uins.Count -eq 1) {
+        $manifest.authenticatedUin = $uins[0]
+    } elseif ($uins.Count -gt 1) {
+        $manifest.authenticatedUin = $uins[0]
+        $manifest.authenticatedUins = $uins
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
     $manifest | ConvertTo-Json -Depth 5 -Compress

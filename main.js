@@ -126,6 +126,36 @@ function readIdentityManifest() {
     return readJson(path.join(identityDirectory(), 'manifest.json'));
 }
 
+async function enrichIdentityManifest(identity) {
+    if (!identity?.archive || (identity.authenticatedUin && identity.deviceName)) return identity;
+    try {
+        const { stdout: names } = await execFileAsync('tar.exe', ['-tzf', identity.archive], {
+            windowsHide: true, timeout: 8_000, maxBuffer: 2 * 1024 * 1024
+        });
+        const current = String(names).match(/(?:^|\n)\.\/private\/files\/user\/u_(\d+)_t(?:\r?\n|$)/)?.[1] || '';
+        let device = {};
+        try {
+            const { stdout } = await execFileAsync('tar.exe', ['-xOzf', identity.archive, './device.json'], {
+                windowsHide: true, timeout: 8_000, maxBuffer: 512 * 1024
+            });
+            device = JSON.parse(String(stdout).replace(/^\uFEFF/, ''));
+        } catch {}
+        const enriched = {
+            ...identity,
+            authenticatedUin: identity.authenticatedUin || current,
+            deviceManufacturer: identity.deviceManufacturer || device.deviceManufacturer || '',
+            deviceModel: identity.deviceModel || device.deviceModel || '',
+            deviceName: identity.deviceName || device.deviceName || ''
+        };
+        if (enriched.authenticatedUin || enriched.deviceName) {
+            fs.writeFileSync(path.join(identityDirectory(), 'manifest.json'), JSON.stringify(enriched, null, 2), 'utf8');
+        }
+        return enriched;
+    } catch {
+        return identity;
+    }
+}
+
 async function inspectAdb(adbPath) {
     if (!adbPath) return { available: false, version: '', devices: [] };
     try {
@@ -134,7 +164,9 @@ async function inspectAdb(adbPath) {
         const devices = String(devicesResult.stdout).split(/\r?\n/).slice(1).map(line => line.trim())
             .filter(Boolean).map(line => {
                 const [serial, state = ''] = line.split(/\s+/, 2);
-                return { serial, state, detail: line };
+                const model = line.match(/(?:^|\s)model:([^\s]+)/)?.[1]?.replace(/_/g, ' ') || '';
+                const product = line.match(/(?:^|\s)product:([^\s]+)/)?.[1]?.replace(/_/g, ' ') || '';
+                return { serial, state, model, product, detail: line };
             });
         return {
             available: true,
@@ -165,7 +197,7 @@ function qsignHealth() {
 
 async function getStatus() {
     const adbPath = await resolveAdbPath();
-    const identity = readIdentityManifest();
+    const identity = await enrichIdentityManifest(readIdentityManifest());
     const qsign = {
         managedProcess: Boolean(qsignProcess && !qsignProcess.killed),
         ...(await qsignHealth())
