@@ -1,0 +1,10 @@
+{
+  "name": "qqnt-mobile-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared mobile QQ identity, qsign and SSO bridge for LiteLoaderQQNT plugins",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js"
+  }
+}

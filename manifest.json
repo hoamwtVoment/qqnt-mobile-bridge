@@ -1,0 +1,24 @@
+{
+  "manifest_version": 4,
+  "type": "framework",
+  "name": "QQNT 移动端桥接",
+  "slug": "qqnt_mobile_bridge",
+  "description": "为其他插件统一提供 ADB、手机 QQ 身份导入、签名服务与移动端原始消息接口。",
+  "version": "0.1.0",
+  "authors": [
+    {
+      "name": "hoamwtVoment"
+    }
+  ],
+  "platform": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
+  "dependencies": [],
+  "injects": {
+    "main": "./main.js",
+    "preload": "./preload.js",
+    "renderer": "./renderer.js"
+  }
+}
