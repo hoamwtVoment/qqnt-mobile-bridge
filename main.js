@@ -257,7 +257,7 @@ async function startQsign() {
     fs.mkdirSync(runtimeDirectory(), { recursive: true });
     qsignLogStream = fs.createWriteStream(path.join(runtimeDirectory(), 'qsign.log'), { flags: 'a' });
     const basePath = path.join(runtimeDirectory(), 'qsign-base');
-    if (!fs.existsSync(path.join(basePath, 'config.json'))) throw new Error('qsign ?????????');
+    if (!fs.existsSync(path.join(basePath, 'config.json'))) throw new Error('qsign 基础文件尚未安装。');
     const command = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : launcher;
     const args = process.platform === 'win32'
         ? ['/d', '/c', 'call', launcher, `--basePath=${basePath}`]
@@ -284,7 +284,7 @@ async function startQsign() {
     }
     broadcastStatus();
     const status = await getStatus();
-    if (!status.qsign.reachable) throw new Error('qsign ??????????????');
+    if (!status.qsign.reachable) throw new Error('qsign 启动失败，请查看运行时日志。');
     return status;
 }
 
