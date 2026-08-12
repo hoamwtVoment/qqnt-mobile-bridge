@@ -204,7 +204,7 @@ export async function onSettingWindowCreated(view) {
         statusMessage.classList.toggle('is-visible', Boolean(text));
     };
 
-    const show = status => {
+    const show = (status, options = {}) => {
         if (!status) return;
         if (status.adbPath) pathInput.value = status.adbPath;
         const device = status.adb?.devices?.find(item => item.state === 'device');
@@ -213,15 +213,26 @@ export async function onSettingWindowCreated(view) {
         setState('device', device ? `${device.serial} · 已授权` : '未连接', device ? 'ok' : 'pending');
         setState('identity', identity ? `QQ ${identity.versionName || '未知版本'}` : '尚未导入', identity ? 'ok' : 'pending');
         setState('qsign', status.qsign?.reachable ? '正在运行' : '未运行', status.qsign?.reachable ? 'ok' : 'pending');
-        setState('sso', status.sso?.available ? '可用' : '尚未完成', status.sso?.available ? 'ok' : 'pending');
-        showMessage(status.adb?.error ? `ADB 错误：${status.adb.error}` : '');
+        const ssoText = status.sso?.available ? '可用' : ({
+            'identity-missing': '缺少手机身份',
+            'qsign-offline': '等待 qsign',
+            'transport-missing': '缺少传输后端'
+        }[status.sso?.stage] || '不可用');
+        setState('sso', ssoText, status.sso?.available ? 'ok' : 'pending');
+        stateElements.sso.title = status.sso?.reason || '';
+        if (!options.preserveMessage) {
+            showMessage(status.adb?.error
+                ? `ADB 错误：${status.adb.error}`
+                : (!status.sso?.available ? status.sso?.reason : ''));
+        }
     };
 
-    const run = async (label, action) => {
-        showMessage(label);
+    const run = async ({ pending, success }, action) => {
+        showMessage(pending);
         try {
             const value = await action();
-            show(value);
+            show(value, { preserveMessage: true });
+            showMessage(typeof success === 'function' ? success(value) : success);
             return value;
         } catch (error) {
             showMessage(`失败：${error?.message || error}`);
@@ -229,13 +240,24 @@ export async function onSettingWindowCreated(view) {
         }
     };
 
-    root.querySelector('#qmb-refresh').addEventListener('click', () => run('正在检查…', () => api.getStatus()));
-    root.querySelector('#qmb-select').addEventListener('click', () => run('正在选择 ADB…', () => api.selectAdb()));
-    root.querySelector('#qmb-download').addEventListener('click', () => run('正在下载官方 Platform-Tools…', () => api.downloadAdb()));
-    root.querySelector('#qmb-import').addEventListener('click', () => run('正在导入手机身份…', () => api.importIdentity(pathInput.value.trim())));
-    root.querySelector('#qmb-qsign-start').addEventListener('click', () => run('正在启动 qsign…', () => api.startQsign()));
-    root.querySelector('#qmb-qsign-stop').addEventListener('click', () => run('正在停止 qsign…', () => api.stopQsign()));
-    root.querySelector('#qmb-status-refresh').addEventListener('click', () => run('正在刷新状态…', () => api.getStatus()));
+    root.querySelector('#qmb-refresh').addEventListener('click', () => run({ pending: '正在检查 ADB…', success: 'ADB 状态已刷新。' }, () => api.getStatus()));
+    root.querySelector('#qmb-select').addEventListener('click', () => run({ pending: '正在选择 ADB…', success: 'ADB 路径已更新。' }, () => api.selectAdb()));
+    root.querySelector('#qmb-download').addEventListener('click', () => run({ pending: '正在下载官方 Platform-Tools…', success: 'Platform-Tools 已下载。' }, () => api.downloadAdb()));
+    root.querySelector('#qmb-import').addEventListener('click', () => run({
+        pending: '正在导入手机身份…',
+        success: value => value?.sso?.available
+            ? '手机身份已导入，移动 SSO 已可用。'
+            : `手机身份已导入。${value?.sso?.reason || '移动 SSO 尚不可用。'}`
+    }, () => api.importIdentity(pathInput.value.trim())));
+    root.querySelector('#qmb-qsign-start').addEventListener('click', () => run({
+        pending: '正在启动 qsign…',
+        success: value => value?.sso?.available ? 'qsign 已启动，移动 SSO 已可用。' : `qsign 已启动。${value?.sso?.reason || ''}`
+    }, () => api.startQsign()));
+    root.querySelector('#qmb-qsign-stop').addEventListener('click', () => run({ pending: '正在停止 qsign…', success: 'qsign 已停止。' }, () => api.stopQsign()));
+    root.querySelector('#qmb-status-refresh').addEventListener('click', () => run({
+        pending: '正在刷新状态…',
+        success: value => value?.sso?.available ? '运行状态已刷新，移动 SSO 可用。' : (value?.sso?.reason || '运行状态已刷新。')
+    }, () => api.getStatus()));
     qsignToggle.addEventListener('click', () => qsignToggle.setActive(!qsignToggle.getActive()));
     root.querySelector('#qmb-save').addEventListener('click', async () => {
         config = await api.saveConfig({ ...config, adbPath: pathInput.value.trim(), qsignEnabled: qsignToggle.getActive() });

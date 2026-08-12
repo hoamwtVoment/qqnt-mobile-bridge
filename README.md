@@ -26,7 +26,7 @@
 身份归档和配置只保存在 LiteLoader 数据目录，不进入 Git。
 
 
-## ?? API
+## 统一 API
 
 渲染进程使用 `window.qqntMobileBridge`：
 

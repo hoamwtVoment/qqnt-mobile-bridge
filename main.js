@@ -165,19 +165,30 @@ function qsignHealth() {
 
 async function getStatus() {
     const adbPath = await resolveAdbPath();
+    const identity = readIdentityManifest();
+    const qsign = {
+        managedProcess: Boolean(qsignProcess && !qsignProcess.killed),
+        ...(await qsignHealth())
+    };
+    let sso;
+    if (!identity) {
+        sso = { available: false, stage: 'identity-missing', reason: '尚未导入手机身份。' };
+    } else if (!qsign.reachable) {
+        sso = { available: false, stage: 'qsign-offline', reason: '手机身份已导入，但 qsign 尚未运行。' };
+    } else {
+        sso = {
+            available: false,
+            stage: 'transport-missing',
+            reason: '手机身份和 qsign 已就绪；移动协议传输后端尚未接入。'
+        };
+    }
     return {
         config: { ...loadConfig(), qsignKey: loadConfig().qsignKey ? 'configured' : '' },
         adbPath,
         adb: await inspectAdb(adbPath),
-        identity: readIdentityManifest(),
-        qsign: {
-            managedProcess: Boolean(qsignProcess && !qsignProcess.killed),
-            ...(await qsignHealth())
-        },
-        sso: {
-            available: false,
-            reason: 'mobile-sso-runtime-pending'
-        }
+        identity,
+        qsign,
+        sso
     };
 }
 
