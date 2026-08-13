@@ -3,6 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const { BrowserWindow, dialog, ipcMain } = require('electron');
@@ -18,10 +20,20 @@ const DEFAULT_CONFIG = Object.freeze({
     qsignPort: 18080,
     qsignKey: 'local'
 });
+const SSO_HOST = '127.0.0.1';
+const SSO_PORT = 18081;
+const RUNTIME_VERSION = 'v0.1.0';
+const RUNTIME_ASSET = `qqnt-mobile-bridge-runtime-win32-x64-${RUNTIME_VERSION}.zip`;
+const RUNTIME_URL = `https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/download/${RUNTIME_VERSION}/${RUNTIME_ASSET}`;
+const RUNTIME_SHA256 = '0c57af5120068cc661f9efc69a992a8dbad65a4b243dd5e0abbe34ecc9b63176';
 
 let configCache = null;
 let qsignProcess = null;
 let qsignLogStream = null;
+let ssoProcess = null;
+let ssoLogStream = null;
+let runtimeInstallPromise = null;
+let runtimeInstallState = { stage: 'idle', message: '' };
 
 function dataDirectory() {
     const base = globalThis.LiteLoader?.path?.data || path.join(process.cwd(), 'data');
@@ -38,6 +50,90 @@ function identityDirectory() {
 
 function runtimeDirectory() {
     return path.join(dataDirectory(), 'runtime');
+}
+
+function runtimeMarkerPath() {
+    return path.join(runtimeDirectory(), 'runtime-version.json');
+}
+
+function runtimeInstalled() {
+    const marker = readJson(runtimeMarkerPath());
+    return marker?.version === RUNTIME_VERSION && Boolean(
+        existingFile(path.join(runtimeDirectory(), 'qsign', 'bin', 'unidbg-fetch-qsign.bat')) &&
+        existingFile(path.join(runtimeDirectory(), 'java', 'bin', 'java.exe')) &&
+        existingFile(path.join(runtimeDirectory(), 'mobile-sso', 'qqnt-mobile-sso.exe'))
+    );
+}
+
+function setRuntimeState(stage, message = '') {
+    runtimeInstallState = { stage, message };
+    broadcastStatus();
+}
+
+function downloadToFile(url, destination, redirects = 0) {
+    return new Promise((resolve, reject) => {
+        if (redirects > 8) return reject(new Error('运行时下载重定向过多。'));
+        const client = url.startsWith('https:') ? https : http;
+        const request = client.get(url, { headers: { 'user-agent': 'qqnt-mobile-bridge' } }, response => {
+            if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
+                response.resume();
+                const next = new URL(response.headers.location, url).toString();
+                downloadToFile(next, destination, redirects + 1).then(resolve, reject);
+                return;
+            }
+            if (response.statusCode !== 200) {
+                response.resume();
+                reject(new Error(`运行时下载失败：HTTP ${response.statusCode}`));
+                return;
+            }
+            const output = fs.createWriteStream(destination);
+            response.pipe(output);
+            output.once('finish', () => output.close(resolve));
+            output.once('error', reject);
+        });
+        request.setTimeout(180_000, () => request.destroy(new Error('运行时下载超时。')));
+        request.once('error', reject);
+    });
+}
+
+async function ensureRuntimeInstalled() {
+    if (process.platform !== 'win32') throw new Error('自动运行时目前只支持 Windows x64。');
+    if (runtimeInstalled()) return runtimeDirectory();
+    if (runtimeInstallPromise) return runtimeInstallPromise;
+    runtimeInstallPromise = (async () => {
+        const parent = dataDirectory();
+        const zip = path.join(parent, `${RUNTIME_ASSET}.download.zip`);
+        const staging = path.join(parent, `runtime-staging-${process.pid}`);
+        try {
+            fs.mkdirSync(parent, { recursive: true });
+            setRuntimeState('downloading', '正在从 GitHub Release 下载移动端运行时…');
+            try { fs.rmSync(zip, { force: true }); } catch {}
+            await downloadToFile(RUNTIME_URL, zip);
+            const actual = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
+            if (actual !== RUNTIME_SHA256) throw new Error(`运行时校验失败：${actual}`);
+            setRuntimeState('installing', '下载完成，正在安装移动端运行时…');
+            try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+            fs.mkdirSync(staging, { recursive: true });
+            await execFileAsync('tar.exe', ['-xf', zip, '-C', staging],
+            { windowsHide: true, timeout: 180_000, maxBuffer: 4 * 1024 * 1024 });
+            for (const required of ['qsign/bin/unidbg-fetch-qsign.bat', 'java/bin/java.exe', 'mobile-sso/qqnt-mobile-sso.exe']) {
+                if (!existingFile(path.join(staging, ...required.split('/')))) throw new Error(`运行时资源缺失：${required}`);
+            }
+            fs.mkdirSync(runtimeDirectory(), { recursive: true });
+            fs.cpSync(staging, runtimeDirectory(), { recursive: true, force: true });
+            fs.writeFileSync(runtimeMarkerPath(), JSON.stringify({ version: RUNTIME_VERSION, installedAt: new Date().toISOString(), sha256: actual }, null, 2));
+            setRuntimeState('ready', '移动端运行时已安装。');
+            return runtimeDirectory();
+        } catch (error) {
+            setRuntimeState('error', error?.message || String(error));
+            throw error;
+        } finally {
+            try { fs.rmSync(zip, { force: true }); } catch {}
+            try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+            runtimeInstallPromise = null;
+        }
+    })();
+    return runtimeInstallPromise;
 }
 
 function downloadedAdbPath() {
@@ -203,6 +299,87 @@ function qsignHealth() {
     });
 }
 
+function requestJson({ host = SSO_HOST, port = SSO_PORT, method = 'GET', requestPath = '/status', body, timeout = 1_200 }) {
+    return new Promise((resolve, reject) => {
+        const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), 'utf8');
+        const request = http.request({
+            host, port, method, path: requestPath, timeout,
+            headers: payload ? {
+                'content-type': 'application/json; charset=utf-8',
+                'content-length': payload.length
+            } : undefined
+        }, response => {
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk));
+            response.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                let value;
+                try { value = text ? JSON.parse(text) : {}; } catch { value = { message: text }; }
+                if ((response.statusCode || 500) >= 400) {
+                    const error = new Error(value?.message || `移动 SSO HTTP ${response.statusCode}`);
+                    error.response = value;
+                    reject(error);
+                    return;
+                }
+                resolve(value);
+            });
+        });
+        request.on('timeout', () => request.destroy(new Error('移动 SSO 请求超时。')));
+        request.on('error', reject);
+        if (payload) request.write(payload);
+        request.end();
+    });
+}
+
+async function ssoHealth() {
+    try {
+        return { reachable: true, ...(await requestJson({ timeout: 800 })) };
+    } catch {
+        return { reachable: false, online: false };
+    }
+}
+
+function ssoRuntimeDirectory() {
+    return path.join(runtimeDirectory(), 'mobile-sso');
+}
+
+function ssoExecutable() {
+    return existingFile(path.join(ssoRuntimeDirectory(), process.platform === 'win32'
+        ? 'qqnt-mobile-sso.exe' : 'qqnt-mobile-sso'));
+}
+
+async function startSso() {
+    const current = await ssoHealth();
+    if (current.reachable) return current;
+    await ensureRuntimeInstalled();
+    await prepareIdentityRuntime();
+    const executable = ssoExecutable();
+    const backendConfig = existingFile(path.join(ssoRuntimeDirectory(), 'config.json'));
+    if (!executable || !backendConfig) throw new Error('移动 SSO 后端尚未安装完整。');
+    if (ssoProcess && ssoProcess.exitCode === null) return ssoHealth();
+    ssoLogStream = fs.createWriteStream(path.join(ssoRuntimeDirectory(), 'mobile-sso.log'), { flags: 'a' });
+    ssoProcess = spawn(executable, [backendConfig], {
+        cwd: ssoRuntimeDirectory(), windowsHide: true, detached: false,
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+    ssoProcess.stdout.pipe(ssoLogStream);
+    ssoProcess.stderr.pipe(ssoLogStream);
+    ssoProcess.once('exit', () => {
+        ssoProcess = null;
+        ssoLogStream?.end();
+        ssoLogStream = null;
+        broadcastStatus();
+    });
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 8_000) {
+        const status = await ssoHealth();
+        if (status.reachable) return status;
+        if (!ssoProcess || ssoProcess.exitCode !== null) break;
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error('移动 SSO 后端启动失败，请查看 mobile-sso.log。');
+}
+
 async function getStatus() {
     const adbPath = await resolveAdbPath();
     const identity = await enrichIdentityManifest(readIdentityManifest());
@@ -210,16 +387,20 @@ async function getStatus() {
         managedProcess: Boolean(qsignProcess && !qsignProcess.killed),
         ...(await qsignHealth())
     };
+    const backend = await ssoHealth();
     let sso;
     if (!identity) {
         sso = { available: false, stage: 'identity-missing', reason: '尚未导入手机身份。' };
     } else if (!qsign.reachable) {
         sso = { available: false, stage: 'qsign-offline', reason: '手机身份已导入，但 qsign 尚未运行。' };
+    } else if (!ssoExecutable()) {
+        sso = { available: false, stage: 'transport-missing', reason: '移动 SSO 后端尚未安装。' };
     } else {
         sso = {
-            available: false,
-            stage: 'transport-missing',
-            reason: '手机身份和 qsign 已就绪；移动协议传输后端尚未接入。'
+            available: backend.reachable,
+            stage: backend.reachable ? (backend.online ? 'online' : 'ready') : 'backend-stopped',
+            reason: backend.reachable ? (backend.error || '移动 SSO 后端已就绪。') : '移动 SSO 后端尚未启动。',
+            ...backend
         };
     }
     return {
@@ -227,11 +408,15 @@ async function getStatus() {
         adbPath,
         adb: await inspectAdb(adbPath),
         identity,
+        runtime: {
+            version: RUNTIME_VERSION,
+            installed: runtimeInstalled(),
+            ...runtimeInstallState
+        },
         qsign,
         sso
     };
 }
-
 async function selectAdb(event) {
     const owner = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(owner || undefined, {
@@ -290,7 +475,78 @@ async function importIdentity(requestedPath = '') {
     ], { windowsHide: true, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
     parseLastJsonLine(stdout);
     saveConfig({ ...config, adbPath });
+    await ensureRuntimeInstalled();
+    await prepareIdentityRuntime(true);
     return getStatus();
+}
+
+async function prepareIdentityRuntime(force = false) {
+    const identity = await enrichIdentityManifest(readIdentityManifest());
+    if (!identity?.archive || !identity.authenticatedUin) throw new Error('手机身份归档不完整，请重新导入。');
+    await ensureRuntimeInstalled();
+    const sessionFile = path.join(ssoRuntimeDirectory(), 'mobile-session.json');
+    const basePath = path.join(runtimeDirectory(), 'qsign-base');
+    const prepared = readJson(path.join(basePath, 'prepared.json'));
+    if (!force && existingFile(sessionFile) && existingFile(path.join(basePath, 'config.json')) &&
+        prepared?.archiveSha256 === identity.archiveSha256) return;
+
+    const temporary = path.join(dataDirectory(), `identity-prepare-${process.pid}`);
+    try {
+        fs.rmSync(temporary, { recursive: true, force: true });
+        fs.mkdirSync(temporary, { recursive: true });
+        await execFileAsync('tar.exe', ['-xzf', identity.archive, '-C', temporary], {
+            windowsHide: true, timeout: 60_000, maxBuffer: 4 * 1024 * 1024
+        });
+        const uidDirectory = path.join(temporary, 'private', 'files', 'uid');
+        const uid = fs.readdirSync(uidDirectory).map(name => name.split('###'))
+            .find(parts => parts[0] === String(identity.authenticatedUin))?.[1] || '';
+        if (!uid) throw new Error('身份归档中没有找到当前认证 QQ 的 UID。');
+        const executable = existingFile(path.join(ssoRuntimeDirectory(), 'qqnt-mobile-sso.exe'));
+        if (!executable) throw new Error('移动 SSO 后端缺失。');
+        fs.mkdirSync(ssoRuntimeDirectory(), { recursive: true });
+        await execFileAsync(executable, ['build-session', temporary, sessionFile,
+            String(identity.authenticatedUin), uid], { windowsHide: true, timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
+
+        fs.mkdirSync(basePath, { recursive: true });
+        for (const name of ['libfekit.so', 'libwtecdh.so']) {
+            const source = path.join(temporary, 'native', name);
+            if (!existingFile(source)) throw new Error(`手机身份中缺少 ${name}。`);
+            fs.copyFileSync(source, path.join(basePath, name));
+        }
+        for (const name of ['dtconfig.json']) {
+            const source = path.join(runtimeDirectory(), 'templates', name);
+            if (existingFile(source)) fs.copyFileSync(source, path.join(basePath, name));
+        }
+        for (const name of ['stdin', 'stdout', 'stderr']) fs.closeSync(fs.openSync(path.join(basePath, name), 'a'));
+        const session = readJson(sessionFile);
+        const qsignConfig = {
+            server: { host: loadConfig().qsignHost, port: loadConfig().qsignPort },
+            share_token: false,
+            key: loadConfig().qsignKey,
+            auto_register: true,
+            protocol: {
+                package_name: loadConfig().packageName,
+                qua: session.qua,
+                version: session.versionName,
+                code: String(session.versionCode)
+            },
+            unidbg: { dynarmic: false, unicorn: true, kvm: false, debug: false },
+            black_list: []
+        };
+        fs.writeFileSync(path.join(basePath, 'config.json'), JSON.stringify(qsignConfig, null, 2), 'utf8');
+        fs.writeFileSync(path.join(basePath, 'prepared.json'), JSON.stringify({
+            archiveSha256: identity.archiveSha256, preparedAt: new Date().toISOString(), runtimeVersion: RUNTIME_VERSION
+        }, null, 2), 'utf8');
+        const backendConfig = {
+            listen: `${SSO_HOST}:${SSO_PORT}`,
+            sessionFile,
+            qsignUrl: `http://${loadConfig().qsignHost}:${loadConfig().qsignPort}`,
+            qsignKey: loadConfig().qsignKey
+        };
+        fs.writeFileSync(path.join(ssoRuntimeDirectory(), 'config.json'), JSON.stringify(backendConfig, null, 2), 'utf8');
+    } finally {
+        try { fs.rmSync(temporary, { recursive: true, force: true }); } catch {}
+    }
 }
 
 function qsignLauncher() {
@@ -302,6 +558,8 @@ function qsignLauncher() {
 async function startQsign() {
     const current = await qsignHealth();
     if (current.reachable) return getStatus();
+    await ensureRuntimeInstalled();
+    await prepareIdentityRuntime();
     const launcher = qsignLauncher();
     if (!launcher) throw new Error('尚未安装 qsign 运行时。');
     if (qsignProcess && !qsignProcess.killed) return getStatus();
@@ -317,7 +575,8 @@ async function startQsign() {
         cwd: path.dirname(path.dirname(launcher)),
         windowsHide: true,
         detached: false,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, JAVA_HOME: path.join(runtimeDirectory(), 'java') }
     });
     qsignProcess.stdout.pipe(qsignLogStream);
     qsignProcess.stderr.pipe(qsignLogStream);
@@ -364,7 +623,7 @@ async function stopQsign() {
 
 async function fetchRawMessage(request) {
     if (!request || typeof request !== 'object') throw new TypeError('拉取请求必须是对象。');
-    const status = await getStatus();
+    let status = await getStatus();
     if (!status.identity) {
         return {
             ok: false,
@@ -373,17 +632,24 @@ async function fetchRawMessage(request) {
             message: '尚未导入手机 QQ 身份，请先导入手机身份。'
         };
     }
+    if (!status.qsign.reachable && loadConfig().qsignEnabled) {
+        await startQsign();
+        status = await getStatus();
+    }
+    if (!status.sso.available && status.sso.stage === 'backend-stopped') {
+        await startSso();
+        status = await getStatus();
+    }
     if (!status.sso.available) {
         return {
             ok: false,
             code: 'MOBILE_SSO_TRANSPORT_UNAVAILABLE',
             stage: status.sso.stage || 'transport-missing',
-            message: status.sso.reason || '手机身份和 qsign 已就绪，但移动 QQ 网络传输后端尚未接入。'
+            message: status.sso.reason || '移动 SSO 后端尚未就绪。'
         };
     }
-    return { ok: false, code: 'MOBILE_SSO_NOT_IMPLEMENTED', message: '移动端 SSO 拉取后端尚未实现。' };
+    return requestJson({ method: 'POST', requestPath: '/pull', body: request, timeout: 45_000 });
 }
-
 const service = Object.freeze({
     getStatus,
     getConfig: () => ({ ...loadConfig() }),
@@ -392,7 +658,8 @@ const service = Object.freeze({
     importIdentity,
     startQsign,
     stopQsign,
-    fetchRawMessage
+    fetchRawMessage,
+    ensureRuntimeInstalled
 });
 
 function installIpc() {
@@ -415,5 +682,21 @@ function installIpc() {
 loadConfig();
 installIpc();
 globalThis.__qqntMobileBridgeService = service;
+
+// Bring the bridge back silently after QQ starts or the plugin is reloaded.
+// Both child processes use windowsHide, so no qsign console needs to remain
+// open on the desktop.
+queueMicrotask(async () => {
+    try {
+        const current = loadConfig();
+        if (!current.qsignEnabled || !readIdentityManifest()) return;
+        await startQsign();
+        await startSso();
+        broadcastStatus();
+    } catch (error) {
+        console.error('[qqnt-mobile-bridge] automatic startup failed:', error);
+        broadcastStatus();
+    }
+});
 
 module.exports = service;

@@ -2,3 +2,5 @@ runtime/
 *.log
 *.zip
 *.tar.gz
+*.exe
+dist/

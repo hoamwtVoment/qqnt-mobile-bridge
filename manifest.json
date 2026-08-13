@@ -11,9 +11,7 @@
     }
   ],
   "platform": [
-    "win32",
-    "linux",
-    "darwin"
+    "win32"
   ],
   "dependencies": [],
   "injects": {

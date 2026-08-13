@@ -77,6 +77,7 @@ $versionCode = [regex]::Match($versionDump, "versionCode=(\d+)").Groups[1].Value
 $abi = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.cpu.abi")
 $deviceManufacturer = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.manufacturer")
 $deviceModel = Invoke-AdbText @("-s", $serial, "shell", "getprop", "ro.product.model")
+$androidId = Invoke-AdbText @("-s", $serial, "shell", "settings", "get", "secure", "android_id")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $remoteStage = "/data/local/tmp/qqnt_mobile_identity_$stamp"
@@ -95,6 +96,19 @@ $relativeSources = @(
     "files/highway_session_info_dir",
     "files/uid",
     "files/user",
+    "files/wlogin_device.dat",
+    "files/imei",
+    "files/pd2.dat",
+    "files/kc",
+    "files/ono-client-sign-probe.json",
+    "databases/tk_file",
+    "databases/tk_file-journal",
+    "databases/tk_file_back",
+    "databases/tk_file_back-journal",
+    "databases/name_file",
+    "databases/name_file-journal",
+    "databases/name_file_back",
+    "databases/name_file_back-journal",
     "shared_prefs/mobileQQ.xml",
     "shared_prefs/sp_login_auto.xml"
 )
@@ -126,6 +140,7 @@ try {
         abi = $abi
         deviceManufacturer = $deviceManufacturer
         deviceModel = $deviceModel
+        androidId = $androidId
         deviceName = ((@($deviceManufacturer, $deviceModel) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join " ").Trim()
         installRoot = $installRoot
     } | ConvertTo-Json -Depth 4 -Compress
@@ -149,6 +164,7 @@ try {
         abi = $abi
         deviceManufacturer = $deviceManufacturer
         deviceModel = $deviceModel
+        androidId = $androidId
         deviceName = ((@($deviceManufacturer, $deviceModel) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join " ").Trim()
         authenticatedUin = ""
         archive = $currentArchive

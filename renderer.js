@@ -217,7 +217,8 @@ export async function onSettingWindowCreated(view) {
         setState('identity', identity ? `QQ ${identity.versionName || '未知版本'}` : '尚未导入', identity ? 'ok' : 'pending');
         setState('account', identity?.authenticatedUin || '待重新导入识别', identity?.authenticatedUin ? 'ok' : 'pending');
         setState('qsign', status.qsign?.reachable ? '正在运行' : '未运行', status.qsign?.reachable ? 'ok' : 'pending');
-        const ssoText = status.sso?.available ? '可用' : ({
+        const runtimeBusy = ['downloading', 'installing'].includes(status.runtime?.stage);
+        const ssoText = runtimeBusy ? (status.runtime.stage === 'downloading' ? '下载运行时' : '安装运行时') : status.sso?.available ? '可用' : ({
             'identity-missing': '缺少手机身份',
             'qsign-offline': '等待 qsign',
             'transport-missing': '传输未接入'
@@ -225,9 +226,9 @@ export async function onSettingWindowCreated(view) {
         setState('sso', ssoText, status.sso?.available ? 'ok' : 'pending');
         stateElements.sso.title = status.sso?.reason || '';
         if (!options.preserveMessage) {
-            showMessage(status.adb?.error
+            showMessage(status.runtime?.message || (status.adb?.error
                 ? `ADB 错误：${status.adb.error}`
-                : (!status.sso?.available ? status.sso?.reason : ''));
+                : (!status.sso?.available ? status.sso?.reason : '')));
         }
     };
 
