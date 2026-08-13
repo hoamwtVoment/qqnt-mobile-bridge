@@ -10,6 +10,15 @@
 - 向其他插件提供统一的移动端原始消息拉取接口。
 - 手机完成导入后无需一直连接电脑。
 
+## 安装
+
+从 [v0.1.0 Release](https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/tag/v0.1.0)
+下载 [`qqnt-mobile-bridge-v0.1.0.zip`](https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/download/v0.1.0/qqnt-mobile-bridge-v0.1.0.zip)，
+解压到 LiteLoaderQQNT 的 `plugins` 目录后重载插件或重启 QQ。
+
+移动 SSO 运行时无需手工安装：首次导入手机身份或启动服务时，插件会从同一
+Release 自动下载并校验运行时文件。
+
 ## 使用
 
 其他插件在 `manifest.json` 中声明：
