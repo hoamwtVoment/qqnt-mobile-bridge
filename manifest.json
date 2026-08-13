@@ -4,7 +4,7 @@
   "name": "QQNT 移动端桥接",
   "slug": "qqnt_mobile_bridge",
   "description": "为其他插件统一提供 ADB、手机 QQ 身份导入、签名服务与移动端原始消息接口。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "authors": [
     {
       "name": "hoamwtVoment"

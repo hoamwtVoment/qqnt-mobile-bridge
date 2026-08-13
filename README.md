@@ -12,8 +12,8 @@
 
 ## 安装
 
-从 [v0.1.0 Release](https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/tag/v0.1.0)
-下载 [`qqnt-mobile-bridge-v0.1.0.zip`](https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/download/v0.1.0/qqnt-mobile-bridge-v0.1.0.zip)，
+从 [最新 Release](https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/latest)
+下载插件压缩包，
 解压到 LiteLoaderQQNT 的 `plugins` 目录后重载插件或重启 QQ。
 
 移动 SSO 运行时无需手工安装：首次导入手机身份或启动服务时，插件会从同一
@@ -53,5 +53,9 @@ Release 下载经过 SHA-256 校验的运行时。Release 只包含 qsign、精�
 - `selectAdb()` / `downloadAdb()` / `importIdentity()`：统一的手机身份导入流程。
 - `startQsign()` / `stopQsign()`：统一管理本地签名服务。
 - `fetchRawMessage(request)`：功能插件共用的移动端原始消息入口。
+
+`fetchRawMessage()` 会在后端解析每页原始 protobuf，并按 `msgSeq` 与非零
+`msgRandom` 匹配目标；当前页未命中时会自动沿群聊序号或私聊时间游标继续
+翻页，返回的 wire bytes 只包含命中的单条消息。
 
 功能插件不应再自行保存 ADB 路径、复制手机身份归档或启动 qsign。

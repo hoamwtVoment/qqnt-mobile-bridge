@@ -22,10 +22,10 @@ const DEFAULT_CONFIG = Object.freeze({
 });
 const SSO_HOST = '127.0.0.1';
 const SSO_PORT = 18081;
-const RUNTIME_VERSION = 'v0.1.0';
+const RUNTIME_VERSION = 'v0.1.1';
 const RUNTIME_ASSET = `qqnt-mobile-bridge-runtime-win32-x64-${RUNTIME_VERSION}.zip`;
 const RUNTIME_URL = `https://github.com/hoamwtVoment/qqnt-mobile-bridge/releases/download/${RUNTIME_VERSION}/${RUNTIME_ASSET}`;
-const RUNTIME_SHA256 = '0c57af5120068cc661f9efc69a992a8dbad65a4b243dd5e0abbe34ecc9b63176';
+const RUNTIME_SHA256 = '4901a34cb6cfea3a7f908686a5172304cc8fdb71f90f4f8965111b62b739fabb';
 
 let configCache = null;
 let qsignProcess = null;
